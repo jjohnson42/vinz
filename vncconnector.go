@@ -1,7 +1,6 @@
 package main
 
 import (
-    "flag"
     "fmt"
     "log"
     "github.com/gorilla/websocket"
@@ -117,9 +116,3 @@ func (vc VncConnector) Connect(vncclient net.Conn) {
 func listenvnc(location string) {
 
 }
-func main() {
-	flag.Parse()
-	vc := createVncConnector(flag.Args()[0], flag.Args()[1], flag.Args()[2])
-	vc.Listen(flag.Args()[3])
-}
-
