@@ -51,33 +51,39 @@ func (vc VncConnector) relayToWebsock(vncclient net.Conn, wserver *websocket.Con
 
 func (vc *VncConnector) relayToVncClient(vncclient net.Conn, wserver *websocket.Conn) {
 	pktnum := 0
+	customnamesupport := true
+	var securitymsg []byte
+	securitymsg = make([]byte, 2)
+	securitymsg[0] = 1
+	securitymsg[1] = 1
 	for {
 		_, msg, err := wserver.ReadMessage()
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		if pktnum == 3 {
-			// Let's interject requested nodename
-			// The default name is generally useless, particularly when dealing
-			// with multiple windows and wanting to do title search'
-			if len(msg) > 24 {
-				fmt.Println(string(msg[24:]))
-				currname := string(msg[24:])
-				if strings.Contains(currname, "OpenBMC IKVM") {
-					fmt.Println(vc.nodename)
+		if pktnum < 4 && customnamesupport {
+			if pktnum == 0 {
+				if !bytes.Equal(msg, []byte("RFB 003.008\n")) {
+					customnamesupport = false
+				}
+			} else if pktnum == 1 {
+				if !bytes.Equal(msg, securitymsg) {
+					customnamesupport = false
+				}
+			} else if pktnum == 3 {
+				// Let's interject requested nodename
+				// The default name is generally useless, particularly when dealing
+				// with multiple windows and wanting to do title search'
+				if len(msg) > 24 {
 					newmsg := make([]byte, 24 + len(vc.nodename))
 
 					copy(newmsg[:20], msg[:20])
 					binary.BigEndian.PutUint32(newmsg[20:], uint32(len(vc.nodename)))
 					copy(newmsg[24:], vc.nodename)
-					fmt.Println(msg)
 					msg = newmsg
-					fmt.Println(msg)
 				}
 			}
-		}
-		if pktnum < 4 {
 			pktnum += 1
 		}
 		vncclient.Write(msg)
