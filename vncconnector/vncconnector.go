@@ -158,6 +158,7 @@ const unix_id_type byte = 1
 //	fingerprint in raw bytes
 
 func (vc *VncConnector) Connect(vnclient net.Conn, uid uint32) error {
+	defer vnclient.Close()
 	var msgsz uint32
 	var rplytype byte
 	conn, err := net.Dial("unix", vc.sessionpath)
