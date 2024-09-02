@@ -1,4 +1,4 @@
-package main
+package vncconnector
 
 import (
 	"bytes"
@@ -25,10 +25,11 @@ type VncConnector struct {
 	sessionpath string
 	clientdir string
 	authtoken string
+	nodename []byte
 }
 
-func CreateVncConnector(endpointid string, sessionpath string, clientdir string, authtoken string) VncConnector {
-	vc := VncConnector{endpointid, sessionpath, clientdir, authtoken}
+func CreateVncConnector(endpointid string, sessionpath string, clientdir string, authtoken string, nodename string) VncConnector {
+	vc := VncConnector{endpointid, sessionpath, clientdir, authtoken, []byte(nodename)}
 	return vc
 }
 
@@ -48,12 +49,36 @@ func (vc VncConnector) relayToWebsock(vncclient net.Conn, wserver *websocket.Con
 	}
 }
 
-func (wc VncConnector) relayToVncClient(vncclient net.Conn, wserver *websocket.Conn) {
+func (vc *VncConnector) relayToVncClient(vncclient net.Conn, wserver *websocket.Conn) {
+	pktnum := 0
 	for {
 		_, msg, err := wserver.ReadMessage()
 		if err != nil {
 			fmt.Println(err)
 			return
+		}
+		if pktnum == 3 {
+			// Let's interject requested nodename
+			// The default name is generally useless, particularly when dealing
+			// with multiple windows and wanting to do title search'
+			if len(msg) > 24 {
+				fmt.Println(string(msg[24:]))
+				currname := string(msg[24:])
+				if strings.Contains(currname, "OpenBMC IKVM") {
+					fmt.Println(vc.nodename)
+					newmsg := make([]byte, 24 + len(vc.nodename))
+
+					copy(newmsg[:20], msg[:20])
+					binary.BigEndian.PutUint32(newmsg[20:], uint32(len(vc.nodename)))
+					copy(newmsg[24:], vc.nodename)
+					fmt.Println(msg)
+					msg = newmsg
+					fmt.Println(msg)
+				}
+			}
+		}
+		if pktnum < 4 {
+			pktnum += 1
 		}
 		vncclient.Write(msg)
 	}
@@ -100,7 +125,7 @@ const unix_id_type byte = 1
 //	authentication payload (uid or TLV of sessionid/xsrftoken)
 
 //reply:
-//	retver byte: 1 == normal, 0 == close
+//	retver byte: 1 == normal, 0 == close, 2 == redirect
 //	host length
 //	host header value
 //	sessionid length
@@ -110,12 +135,12 @@ const unix_id_type byte = 1
 //	uint32 fingerprint length (length determines if sha256, sha384, or sha512)
 //	fingerprint in raw bytes
 
-func (vc VncConnector) getParams(uid uint32) ([]byte, string, string, string, error) {
+func (vc *VncConnector) Connect(vnclient net.Conn, uid uint32) error {
 	var msgsz uint32
 	var rplytype byte
 	conn, err := net.Dial("unix", vc.sessionpath)
 	if err != nil {
-		return []byte{}, "", "", "", err
+		return err
 	}
 	defer conn.Close()
 	bendpointid := []byte(vc.endpointid)
@@ -128,23 +153,34 @@ func (vc VncConnector) getParams(uid uint32) ([]byte, string, string, string, er
 	binary.Write(conn, binary.BigEndian, unix_id_type)
 	binary.Write(conn, binary.BigEndian, uid)
 	binary.Read(conn, binary.BigEndian, &rplytype)
-	if rplytype != 1 {
+	if rplytype == 1 {
+		binary.Read(conn, binary.BigEndian, &msgsz)
+		hostname := make([]byte, msgsz)
+		io.ReadFull(conn, hostname)
+		binary.Read(conn, binary.BigEndian, &msgsz)
+		sessionid := make([]byte, msgsz)
+		io.ReadFull(conn, sessionid)
+		binary.Read(conn, binary.BigEndian, &msgsz)
+		xsrftoken := make([]byte, msgsz)
+		_, err = io.ReadFull(conn, xsrftoken)
+		binary.Read(conn, binary.BigEndian, &msgsz)
+		fprint := make([]byte, msgsz)
+		_, err = io.ReadFull(conn, fprint)
+		if err != nil {
+			return nil
+		}
+		vc.connectVncToIkvm(vnclient, fprint, string(sessionid), string(xsrftoken), string(hostname))
+		return nil
+	} else if rplytype == 2 { // redirect
+		binary.Read(conn, binary.BigEndian, &msgsz)
+		peervinz := make([]byte, msgsz)  // This should be a full url
+		io.ReadFull(conn, peervinz)
+		err := errors.New("TODO: implement redirect")
+		return err
+	} else {
 		err := errors.New("Failure getting parameters")
-		return  []byte{}, "", "", "", err
+		return  err
 	}
-	binary.Read(conn, binary.BigEndian, &msgsz)
-	hostname := make([]byte, msgsz)
-	io.ReadFull(conn, hostname)
-	binary.Read(conn, binary.BigEndian, &msgsz)
-	sessionid := make([]byte, msgsz)
-	io.ReadFull(conn, sessionid)
-	binary.Read(conn, binary.BigEndian, &msgsz)
-	xsrftoken := make([]byte, msgsz)
-	_, err = io.ReadFull(conn, xsrftoken)
-	binary.Read(conn, binary.BigEndian, &msgsz)
-	fprint := make([]byte, msgsz)
-	_, err = io.ReadFull(conn, fprint)
-	return fprint, string(sessionid), string(xsrftoken), string(hostname), err
 }
 
 func SetCookies(targurl string, sessionid string, xsrftoken string, jar http.CookieJar) error {
@@ -167,12 +203,7 @@ func SetCookies(targurl string, sessionid string, xsrftoken string, jar http.Coo
 	jar.SetCookies(targurlparsed, cookies)
 	return nil
 }
-func (vc VncConnector) Connect(vncclient net.Conn, uid uint32) error {
-	// Fetch TLS fingerprint, SESSION, TOKEN, URL, HOST from socket based on UUID
-	fprint, sessionid, xsrftoken, target, err := vc.getParams(uid)
-	if err != nil {
-		return err
-	}
+func (vc VncConnector) connectVncToIkvm(vncclient net.Conn, fprint []byte, sessionid string, xsrftoken string, target string) error {
 	zoneidx := strings.Index(target, "%")
 	var hostname string
 	if zoneidx >= 0 {
@@ -206,6 +237,7 @@ func (vc VncConnector) Connect(vncclient net.Conn, uid uint32) error {
 			return errors.New("Mismatched fingerprint")
 		},
 	}
+	var err error
 	dialer.Jar, err = cookiejar.New(nil)
 	if err != nil {
 		return err
@@ -242,7 +274,3 @@ func (vc VncConnector) Connect(vncclient net.Conn, uid uint32) error {
 // go handlectlreq(conn)
 //  }
 //}
-
-func listenvnc(location string) {
-
-}
