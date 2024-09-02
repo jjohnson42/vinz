@@ -225,7 +225,27 @@ func SetCookies(targurl string, sessionid string, xsrftoken string, jar http.Coo
 	jar.SetCookies(targurlparsed, cookies)
 	return nil
 }
-func (vc VncConnector) connectVncToIkvm(vncclient net.Conn, fprint []byte, sessionid string, xsrftoken string, target string) error {
+
+func (vc *VncConnector) connectVncToIkvm(vncclient net.Conn, fprint []byte, sessionid string, xsrftoken string, target string) error {
+	wserver, err := vc.connectToIkvm(fprint, sessionid, xsrftoken, target)
+	if err != nil {
+		return err
+	}
+	defer wserver.Close()
+	toclient := make(chan []byte)
+	go relayPlainToWebsock(vncclient, wserver)
+	go vc.relayToClient(toclient, wserver)
+	for {
+		msg, more := <- toclient
+		if !more {
+			break
+		}
+		vncclient.Write(msg)
+	}
+	return nil
+}
+
+func (vc *VncConnector) connectToIkvm(fprint []byte, sessionid string, xsrftoken string, target string) (*websocket.Conn, error) {
 	zoneidx := strings.Index(target, "%")
 	var hostname string
 	if zoneidx >= 0 {
@@ -262,7 +282,7 @@ func (vc VncConnector) connectVncToIkvm(vncclient net.Conn, fprint []byte, sessi
 	var err error
 	dialer.Jar, err = cookiejar.New(nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	dialer.Subprotocols = make([]string, 0)
 	dialer.Subprotocols = append(dialer.Subprotocols, xsrftoken)
@@ -274,18 +294,7 @@ func (vc VncConnector) connectVncToIkvm(vncclient net.Conn, fprint []byte, sessi
 	if err != nil {
 		fmt.Println(err)
 		fmt.Println(rsp)
-		return err
+		return nil, err
 	}
-	defer wserver.Close()
-	toclient := make(chan []byte)
-	go relayPlainToWebsock(vncclient, wserver)
-	go vc.relayToClient(toclient, wserver)
-	for {
-		msg, more := <- toclient
-		if !more {
-			break
-		}
-		vncclient.Write(msg)
-	}
-	return nil
+	return wserver, nil
 }
