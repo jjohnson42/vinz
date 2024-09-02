@@ -33,15 +33,15 @@ func CreateVncConnector(endpointid string, sessionpath string, clientdir string,
 	return vc
 }
 
-func (vc VncConnector) relayToWebsock(vncclient net.Conn, wserver *websocket.Conn) {
+func relayPlainToWebsock(src net.Conn, dst *websocket.Conn) {
 	inbuffer := make([]byte, 65536)
 	for {
-		mlen, err := vncclient.Read(inbuffer)
+		mlen, err := src.Read(inbuffer)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		err = wserver.WriteMessage(websocket.BinaryMessage, inbuffer[:mlen])
+		err = dst.WriteMessage(websocket.BinaryMessage, inbuffer[:mlen])
 		if err != nil {
 			fmt.Println(err)
 			return
@@ -49,7 +49,23 @@ func (vc VncConnector) relayToWebsock(vncclient net.Conn, wserver *websocket.Con
 	}
 }
 
-func (vc *VncConnector) relayToVncClient(vncclient net.Conn, wserver *websocket.Conn) {
+func relayWebSockToWebsock(src *websocket.Conn, dst *websocket.Conn) {
+	for {
+		typ, msg, err := src.ReadMessage()
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		err = dst.WriteMessage(typ, msg)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+	}
+}
+func (vc *VncConnector) relayToClient(toclient chan []byte, wserver *websocket.Conn) {
+	// calling function is expected to handle details of plain v. websock client
+	defer close(toclient)
 	pktnum := 0
 	customnamesupport := true
 	var securitymsg []byte
@@ -86,7 +102,7 @@ func (vc *VncConnector) relayToVncClient(vncclient net.Conn, wserver *websocket.
 			}
 			pktnum += 1
 		}
-		vncclient.Write(msg)
+		toclient <- msg
 	}
 }
 
@@ -261,22 +277,15 @@ func (vc VncConnector) connectVncToIkvm(vncclient net.Conn, fprint []byte, sessi
 		return err
 	}
 	defer wserver.Close()
-	go vc.relayToWebsock(vncclient, wserver)
-	vc.relayToVncClient(vncclient, wserver)
+	toclient := make(chan []byte)
+	go relayPlainToWebsock(vncclient, wserver)
+	go vc.relayToClient(toclient, wserver)
+	for {
+		msg, more := <- toclient
+		if !more {
+			break
+		}
+		vncclient.Write(msg)
+	}
 	return nil
 }
-
-//func listencontrol(ctlpath string) {
-//       csock, err := net.Listen("unix", ctlpath)
-//      if err != nil {
-//             panic(err)
-//    }
-//   for {
-//conn, err := csock.Accept()
-//if err != nil {
-//        fmt.Println(err)
-//        continue
-//}
-// go handlectlreq(conn)
-//  }
-//}
