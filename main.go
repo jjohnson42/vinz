@@ -13,13 +13,13 @@ import (
 func main() {
 	clientdir := flag.String("d", "", "Directory to place UNIX client facing sockets for VNC")
 	approver := flag.String("a", "", "Approver socket used to arbitrate new client connection attempts")
-	//wsockpath := flag.String("w", "", "Websocket listen specification")
+	wsockpath := flag.String("w", "", "Websocket listen specification")
 	location := flag.String("c", "", "Control socket path to listen for commands")
 
 	flag.Parse()
 	//endpointid := flag.Args()[0]
 	authtoken := os.Getenv("VINZ_TOKEN")
-	ctl, err := controller.CreateController(*location, authtoken, *approver, *clientdir)
+	ctl, err := controller.CreateController(*location, authtoken, *approver, *clientdir, *wsockpath)
 	if err != nil {
 		panic(err)
 	}
