@@ -49,6 +49,9 @@ func (ctl *Controller) handleControlRequest (conn net.Conn) error {
 		return err
 	}
 	if cmdcode == 1 {
+		// request to make a new unix socket entry point
+		// randomize name and notify controller of
+		// the name for it's reference'
 		binary.Read(conn, binary.BigEndian, &msgsize)
 		nodename := make([]byte, msgsize)
 		_, err := io.ReadFull(conn, nodename)
@@ -67,17 +70,6 @@ func (ctl *Controller) handleControlRequest (conn net.Conn) error {
 		conn.Write(filenamebytes)
 		binary.Write(conn, binary.BigEndian, byte(255))
 		go vc.Listen()
-	} else if cmdcode == 2 {  // register trusted peer authtoken
-		binary.Read(conn, binary.BigEndian, &msgsize)
-		peersessionid := make([]byte, msgsize)
-		_, err := io.ReadFull(conn, peersessionid)
-		binary.Read(conn, binary.BigEndian, &msgsize)
-		peerauthtoken := make([]byte, msgsize)
-		_, err = io.ReadFull(conn, peerauthtoken)
-		if err != nil {
-			return err
-		}
-		ctl.wss.RegisterSession(string(peersessionid), string(peerauthtoken))
 	} else {
 		return errors.New("Unrecognized command code")
 	}

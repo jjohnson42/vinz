@@ -45,6 +45,10 @@ func CreateVncConnector(sessionpath string, clientdir string, authtoken string, 
 
 func relayPlainToWebsock(src net.Conn, dst *websocket.Conn) {
 	inbuffer := make([]byte, 65536)
+	defer func() {
+		dst.Close()
+		src.Close()
+	}()
 	for {
 		mlen, err := src.Read(inbuffer)
 		if err != nil {
@@ -60,6 +64,10 @@ func relayPlainToWebsock(src net.Conn, dst *websocket.Conn) {
 }
 
 func relayWebSockToWebsock(src *websocket.Conn, dst *websocket.Conn) {
+	defer func() {
+		dst.Close()
+		src.Close()
+	}()
 	for {
 		typ, msg, err := src.ReadMessage()
 		if err != nil {
@@ -75,7 +83,10 @@ func relayWebSockToWebsock(src *websocket.Conn, dst *websocket.Conn) {
 }
 func (vc *VncConnector) relayToClient(toclient chan []byte, wserver *websocket.Conn) {
 	// calling function is expected to handle details of plain v. websock client
-	defer close(toclient)
+	defer func() {
+		close(toclient)
+		wserver.Close()
+	}()
 	pktnum := 0
 	customnamesupport := true
 	var securitymsg []byte
@@ -253,7 +264,22 @@ func (vc *VncConnector) connectVncToIkvm(vncclient net.Conn, fprint []byte, sess
 	if err != nil {
 		return err
 	}
-	defer wserver.Close()
+	defer func() {
+		bauthtoken := []byte(vc.authtoken)
+		wserver.Close()
+		conn, err := net.Dial("unix", vc.sessionpath)
+		if err != nil {
+			return
+		}
+		// Notify controller of disconnect, allowing it to logout or
+		// whatever is appropriate
+		binary.Write(conn, binary.BigEndian, byte(2)) // disconnect notification
+		binary.Write(conn, binary.BigEndian, uint32(len(bauthtoken)))
+		conn.Write(bauthtoken)
+		binary.Write(conn, binary.BigEndian, uint32(len(sessionid)))
+		conn.Write([]byte(sessionid))
+		binary.Write(conn, binary.BigEndian, byte(255)) // disconnect notification
+	}()
 	toclient := make(chan []byte)
 	go relayPlainToWebsock(vncclient, wserver)
 	go vc.relayToClient(toclient, wserver)
