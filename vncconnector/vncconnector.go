@@ -168,7 +168,7 @@ const rqver byte = 1
 //      0xff - terminator
 
 //reply:
-//	retver byte: 1 == normal, 0 == close, 2 == redirect
+//	retver byte: 1 == normal, 0 == close
 //	host length
 //	host header value
 //	sessionid length
@@ -240,12 +240,6 @@ func (vc *VncConnector) gen_connect(vnclient net.Conn, wsclient *websocket.Conn,
 		}
 		vc.connectVncToIkvm(vnclient, wsclient, fprint, string(sessionid), string(xsrftoken), string(hostname))
 		return nil
-	} else if rplytype == 2 { // redirect
-		binary.Read(conn, binary.BigEndian, &msgsz)
-		peervinz := make([]byte, msgsz)  // This should be a full url
-		io.ReadFull(conn, peervinz)
-		err := errors.New("TODO: implement redirect")
-		return err
 	} else {
 		err := errors.New("Failure getting parameters")
 		return  err
