@@ -78,7 +78,7 @@ func (ctl *Controller) handleControlRequest (conn net.Conn) error {
 
 
 func CreateController(apilocation string, authtoken string, approver string, clientdir string, websockspec string) (Controller, error) {
-	wss := websockserver.CreateWebSockServer()
+	wss := websockserver.CreateWebSockServer(approver, authtoken)
 	go wss.Listen(websockspec)
 	return Controller{approver, clientdir, authtoken, apilocation, wss}, nil
 }

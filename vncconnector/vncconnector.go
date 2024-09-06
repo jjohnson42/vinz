@@ -19,7 +19,6 @@ import (
 	"os"
 	"strings"
 	"syscall"
-
 	"github.com/gorilla/websocket"
 )
 
@@ -151,12 +150,11 @@ func (vc VncConnector) Listen() {
 		scc.Control(func (fdesc uintptr) {
 			ucred, err = syscall.GetsockoptUcred(int(fdesc), syscall.SOL_SOCKET, syscall.SO_PEERCRED)
 		})
-		go vc.Connect(conn, ucred.Uid)
+		go vc.Connect(conn, ucred.Uid)  // Connect with unix auth
 	}
 }
 
 const rqver byte = 1
-const unix_id_type byte = 1
 
 // Parameter protocol:
 // request:
@@ -183,8 +181,17 @@ const unix_id_type byte = 1
 //	wss url (this might be /kvm/0, or it could be a vinz url)
 //      0xff - terminator
 
+func (vc *VncConnector) WebsockConnect(vnclient *websocket.Conn, sessionid string, xsrftoken string) error {
+	defer vnclient.Close()
+	return vc.gen_connect(nil, vnclient, 0, sessionid, xsrftoken, 2)
+}
+
 func (vc *VncConnector) Connect(vnclient net.Conn, uid uint32) error {
 	defer vnclient.Close()
+	return vc.gen_connect(vnclient, nil, uid, "", "", 1)
+}
+
+func (vc *VncConnector) gen_connect(vnclient net.Conn, wsclient *websocket.Conn, uid uint32, sessionid string, xsrftoken string, method byte) error {
 	var msgsz uint32
 	var rplytype byte
 	conn, err := net.Dial("unix", vc.sessionpath)
@@ -199,8 +206,15 @@ func (vc *VncConnector) Connect(vnclient net.Conn, uid uint32) error {
 	conn.Write(bauthtoken)
 	binary.Write(conn, binary.BigEndian, uint32(len((bnodename))))
 	conn.Write(bnodename)
-	binary.Write(conn, binary.BigEndian, unix_id_type)
-	binary.Write(conn, binary.BigEndian, uid)
+	binary.Write(conn, binary.BigEndian, method)
+	if method == 1 {
+		binary.Write(conn, binary.BigEndian, uid)
+	} else if method == 2 {
+		binary.Write(conn, binary.BigEndian, uint32(len(sessionid)))
+		conn.Write([]byte(sessionid))
+		binary.Write(conn, binary.BigEndian, uint32(len(xsrftoken)))
+		conn.Write([]byte(xsrftoken))
+	}
 	binary.Write(conn, binary.BigEndian, byte(255))
 	binary.Read(conn, binary.BigEndian, &rplytype)
 	if rplytype == 1 {
@@ -224,7 +238,7 @@ func (vc *VncConnector) Connect(vnclient net.Conn, uid uint32) error {
 		if err != nil {
 			return err
 		}
-		vc.connectVncToIkvm(vnclient, fprint, string(sessionid), string(xsrftoken), string(hostname))
+		vc.connectVncToIkvm(vnclient, wsclient, fprint, string(sessionid), string(xsrftoken), string(hostname))
 		return nil
 	} else if rplytype == 2 { // redirect
 		binary.Read(conn, binary.BigEndian, &msgsz)
@@ -259,7 +273,7 @@ func SetCookies(targurl string, sessionid string, xsrftoken string, jar http.Coo
 	return nil
 }
 
-func (vc *VncConnector) connectVncToIkvm(vncclient net.Conn, fprint []byte, sessionid string, xsrftoken string, target string) error {
+func (vc *VncConnector) connectVncToIkvm(vncclient net.Conn, wsclient *websocket.Conn, fprint []byte, sessionid string, xsrftoken string, target string) error {
 	wserver, err := vc.connectToIkvm(fprint, sessionid, xsrftoken, target)
 	if err != nil {
 		return err
@@ -281,14 +295,22 @@ func (vc *VncConnector) connectVncToIkvm(vncclient net.Conn, fprint []byte, sess
 		binary.Write(conn, binary.BigEndian, byte(255)) // disconnect notification
 	}()
 	toclient := make(chan []byte)
-	go relayPlainToWebsock(vncclient, wserver)
 	go vc.relayToClient(toclient, wserver)
+	if wsclient == nil {
+		go relayPlainToWebsock(vncclient, wserver)
+	} else {
+		go relayWebSockToWebsock(wsclient, wserver)
+	}
 	for {
 		msg, more := <- toclient
 		if !more {
 			break
 		}
-		vncclient.Write(msg)
+		if vncclient != nil {
+			vncclient.Write(msg)
+		} else {
+			wsclient.WriteMessage(websocket.BinaryMessage, msg)
+		}
 	}
 	return nil
 }
