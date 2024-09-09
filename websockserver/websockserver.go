@@ -30,25 +30,36 @@ func (wss *WebSockServer) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 		wr.WriteHeader(401)
 		return
 	}
+	nodename := strings.Replace(r.URL.Path, "/kvmsession/", "", 1)
+	vc, err := vncconnector.CreateVncConnector(wss.approver, "", wss.authtoken, nodename)
+	if err != nil {
+		wr.WriteHeader(401)
+		return
+	}
+	vconn, err := vc.GetWebsockConnection(sessionid, subprots[0])
+	if err != nil {
+		wr.WriteHeader(401)
+		return
+	}
 	wsupgrader := websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { // stub out origin check
 			// We use more strong authentication that origin checking,
 			return true
 		},
+		Subprotocols: subprots,
 	}
-	nodename := strings.Replace(r.URL.Path, "/kvmsession/", "", 1)
 	conn, err := wsupgrader.Upgrade(wr, r, nil)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	vc, err := vncconnector.CreateVncConnector(wss.approver, "", wss.authtoken, nodename)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	vc.WebsockConnect(conn, sessionid, subprots[0])
+	vconn.WebSockConnect((conn))
 }
+// vconn := vc.GetWebsockConnection(conn, sessionid, subprots[0]}
 
 
 

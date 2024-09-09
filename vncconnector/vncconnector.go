@@ -31,6 +31,21 @@ type VncConnector struct {
 	targurl string
 }
 
+type VncConnection struct {
+	sessionid string
+	sessiontoken string
+	hostname string
+	fingperprint []byte
+	targurl string
+	vinztoken string
+	sessionpath string
+	nodename string
+}
+
+func CreateVncConnection(vinztoken string, sessionpath string, nodename string) VncConnection {
+	vconn := VncConnection{"", "", "", []byte(""), "", vinztoken, sessionpath, nodename}
+	return vconn
+}
 func CreateVncConnector(sessionpath string, clientdir string, authtoken string, nodename string) (*VncConnector, error) {
 	sessfilenamebytes := make([]byte, 33)
 	_, err := rand.Read(sessfilenamebytes)
@@ -80,7 +95,7 @@ func relayWebSockToWebsock(src *websocket.Conn, dst *websocket.Conn) {
 		}
 	}
 }
-func (vc *VncConnector) relayToClient(toclient chan []byte, wserver *websocket.Conn) {
+func (vconn *VncConnection) relayToClient(toclient chan []byte, wserver *websocket.Conn) {
 	// calling function is expected to handle details of plain v. websock client
 	defer func() {
 		close(toclient)
@@ -112,12 +127,12 @@ func (vc *VncConnector) relayToClient(toclient chan []byte, wserver *websocket.C
 				// The default name is generally useless, particularly when dealing
 				// with multiple windows and wanting to do title search'
 				if len(msg) > 24 {
-					newmsg := make([]byte, 24 + len(vc.nodename) + 4)
+					newmsg := make([]byte, 24 + len(vconn.nodename) + 4)
 
 					copy(newmsg[:20], msg[:20])
-					binary.BigEndian.PutUint32(newmsg[20:], uint32(4 + len(vc.nodename)))
-					copy(newmsg[24:], vc.nodename)
-					copy(newmsg[24+len(vc.nodename):], " KVM")
+					binary.BigEndian.PutUint32(newmsg[20:], uint32(4 + len(vconn.nodename)))
+					copy(newmsg[24:], vconn.nodename)
+					copy(newmsg[24+len(vconn.nodename):], " KVM")
 					msg = newmsg
 				}
 			}
@@ -181,26 +196,39 @@ const rqver byte = 1
 //	wss url (this might be /kvm/0, or it could be a vinz url)
 //      0xff - terminator
 
-func (vc *VncConnector) WebsockConnect(vnclient *websocket.Conn, sessionid string, xsrftoken string) error {
-	defer vnclient.Close()
-	return vc.gen_connect(nil, vnclient, 0, sessionid, xsrftoken, 2)
+func (vc *VncConnector) GetWebsockConnection(sessionid string, xsrftoken string) (*VncConnection, error) {
+	vconn := CreateVncConnection(vc.authtoken, vc.sessionpath, string(vc.nodename))
+	err := vconn.Prepare(2, 0, sessionid, xsrftoken)
+	return &vconn, err
+	// return vconn.gen_connect(nil, vnclient, 0, sessionid, xsrftoken, 2)
+}
+
+func (vconn *VncConnection) WebSockConnect(wsclient *websocket.Conn) error {
+	return vconn.Connect(nil, wsclient)
 }
 
 func (vc *VncConnector) Connect(vnclient net.Conn, uid uint32) error {
-	defer vnclient.Close()
-	return vc.gen_connect(vnclient, nil, uid, "", "", 1)
+	vconn := CreateVncConnection(vc.authtoken, vc.sessionpath, string(vc.nodename))
+	err := vconn.Prepare(1, uid, "", "")
+	if err != nil {
+		return err
+	}
+	err = vconn.Connect(vnclient, nil)
+	return err
+	// return vc.gen_connect(vnclient, nil, uid, "", "", 1)
 }
 
-func (vc *VncConnector) gen_connect(vnclient net.Conn, wsclient *websocket.Conn, uid uint32, sessionid string, xsrftoken string, method byte) error {
+//func (vc *VncConnector) gen_connect(vnclient net.Conn, wsclient *websocket.Conn, uid uint32, sessionid string, xsrftoken string, method byte) error {
+func (vconn *VncConnection) Prepare(method byte, uid uint32, clisessionid string, clixsrftoken string) error {
 	var msgsz uint32
 	var rplytype byte
-	conn, err := net.Dial("unix", vc.sessionpath)
+	conn, err := net.Dial("unix", vconn.sessionpath)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	bnodename := []byte(vc.nodename)
-	bauthtoken := []byte(vc.authtoken)
+	bnodename := []byte(vconn.nodename)
+	bauthtoken := []byte(vconn.vinztoken)
 	binary.Write(conn, binary.BigEndian, rqver)
 	binary.Write(conn, binary.BigEndian, uint32(len(bauthtoken)))
 	conn.Write(bauthtoken)
@@ -210,10 +238,10 @@ func (vc *VncConnector) gen_connect(vnclient net.Conn, wsclient *websocket.Conn,
 	if method == 1 {
 		binary.Write(conn, binary.BigEndian, uid)
 	} else if method == 2 {
-		binary.Write(conn, binary.BigEndian, uint32(len(sessionid)))
-		conn.Write([]byte(sessionid))
-		binary.Write(conn, binary.BigEndian, uint32(len(xsrftoken)))
-		conn.Write([]byte(xsrftoken))
+		binary.Write(conn, binary.BigEndian, uint32(len(clisessionid)))
+		conn.Write([]byte(clisessionid))
+		binary.Write(conn, binary.BigEndian, uint32(len(clixsrftoken)))
+		conn.Write([]byte(clixsrftoken))
 	}
 	binary.Write(conn, binary.BigEndian, byte(255))
 	binary.Read(conn, binary.BigEndian, &rplytype)
@@ -233,12 +261,16 @@ func (vc *VncConnector) gen_connect(vnclient net.Conn, wsclient *websocket.Conn,
 		binary.Read(conn, binary.BigEndian, &msgsz)
 		url := make([]byte, msgsz)
 		_, err = io.ReadFull(conn, url)
-		vc.targurl = string(url)
+		vconn.targurl = string(url)
 		err = binary.Read(conn, binary.BigEndian, &rplytype)  // consume 0xff
 		if err != nil {
 			return err
 		}
-		vc.connectVncToIkvm(vnclient, wsclient, fprint, string(sessionid), string(xsrftoken), string(hostname))
+		vconn.fingperprint = fprint
+		vconn.sessionid = string(sessionid)
+		vconn.sessiontoken = string(xsrftoken)
+		vconn.hostname = string(hostname)
+		//vc.connectVncToIkvm(vnclient, wsclient, fprint, string(sessionid), string(xsrftoken), string(hostname))
 		return nil
 	} else {
 		err := errors.New("Failure getting parameters")
@@ -267,15 +299,16 @@ func SetCookies(targurl string, sessionid string, xsrftoken string, jar http.Coo
 	return nil
 }
 
-func (vc *VncConnector) connectVncToIkvm(vncclient net.Conn, wsclient *websocket.Conn, fprint []byte, sessionid string, xsrftoken string, target string) error {
-	wserver, err := vc.connectToIkvm(fprint, sessionid, xsrftoken, target)
+func (vconn *VncConnection) Connect(vncclient net.Conn, wsclient *websocket.Conn) error {
+	sessionid := vconn.sessionid
+	wserver, err := vconn.connectToIkvm()
 	if err != nil {
 		return err
 	}
 	defer func() {
-		bauthtoken := []byte(vc.authtoken)
+		bauthtoken := []byte(vconn.vinztoken)
 		wserver.Close()
-		conn, err := net.Dial("unix", vc.sessionpath)
+		conn, err := net.Dial("unix", vconn.sessionpath)
 		if err != nil {
 			return
 		}
@@ -289,7 +322,7 @@ func (vc *VncConnector) connectVncToIkvm(vncclient net.Conn, wsclient *websocket
 		binary.Write(conn, binary.BigEndian, byte(255)) // disconnect notification
 	}()
 	toclient := make(chan []byte)
-	go vc.relayToClient(toclient, wserver)
+	go vconn.relayToClient(toclient, wserver)
 	if wsclient == nil {
 		go relayPlainToWebsock(vncclient, wserver)
 	} else {
@@ -309,8 +342,11 @@ func (vc *VncConnector) connectVncToIkvm(vncclient net.Conn, wsclient *websocket
 	return nil
 }
 
-func (vc *VncConnector) connectToIkvm(fprint []byte, sessionid string, xsrftoken string, target string) (*websocket.Conn, error) {
+func (vconn *VncConnection) connectToIkvm() (*websocket.Conn, error) {
+	target := vconn.hostname
+	fprint := vconn.fingperprint
 	zoneidx := strings.Index(target, "%")
+	xsrftoken := vconn.sessiontoken
 	var hostname string
 	if zoneidx >= 0 {
 		hostname = target[:zoneidx]
@@ -353,8 +389,8 @@ func (vc *VncConnector) connectToIkvm(fprint []byte, sessionid string, xsrftoken
 	dialer.Subprotocols = append(dialer.Subprotocols, xsrftoken)
 	headers := http.Header{}
 	headers.Add("Host", hostname)
-	targurl := fmt.Sprintf("wss://%s%s", urlhost, vc.targurl)
-	SetCookies(targurl, sessionid, xsrftoken, dialer.Jar)
+	targurl := fmt.Sprintf("wss://%s%s", urlhost, vconn.targurl)
+	SetCookies(targurl, vconn.sessionid, vconn.sessiontoken, dialer.Jar)
 	wserver, rsp, err := dialer.Dial(targurl, headers)
 	if err != nil {
 		fmt.Println(err)
