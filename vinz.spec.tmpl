@@ -1,0 +1,32 @@
+Name:           confluent-vinz
+Version:        #VERSION#
+%define fversion %{lua:
+sv, _ = string.gsub("#VERSION#", "[~+]", "-")
+print(sv)
+}
+Release:        1
+Summary:        Remote VNC arbitrator
+Group:          Applications/System
+License:        Apache
+Source:         confluent-vinz.tar
+%global source_date_epoch_from_changelog 0
+%global debug_package %{nil}
+
+%description
+Confluent vinz connects VNC clients from Unix sockets or websocket sessions to
+OpenBMC iKVM connections, as arbitrated by an external controller (e.g. confluent)
+
+%prep
+%setup -n vinz
+go get vinz
+
+%build
+go build -ldflags "-s -w -linkmode=external"
+#go build
+
+%install
+mkdir -p %{buildroot}/opt/confluent/bin/
+cp vinz  %{buildroot}/opt/confluent/bin/
+
+%files
+/opt/confluent/bin/vinz
