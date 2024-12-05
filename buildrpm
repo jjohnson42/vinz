@@ -1,4 +1,5 @@
 cd $(dirname $0)
+mkdir -p ~/rpmbuild/SOURCES
 cd ..;tar cvf ~/rpmbuild/SOURCES/confluent-vinz.tar vinz; cd -
 VERSION=`git describe|cut -d- -f 1`
 NUMCOMMITS=`git describe|cut -d- -f 2`
