@@ -392,6 +392,11 @@ func (vconn *VncConnection) connectToIkvm() (*websocket.Conn, error) {
 	targurl := fmt.Sprintf("wss://%s%s", urlhost, vconn.targurl)
 	SetCookies(targurl, vconn.sessionid, vconn.sessiontoken, dialer.Jar)
 	wserver, rsp, err := dialer.Dial(targurl, headers)
+	if (rsp.StatusCode == 404) {
+		targurl := fmt.Sprintf("wss://%s%s/multi", urlhost, vconn.targurl)
+		SetCookies(targurl, vconn.sessionid, vconn.sessiontoken, dialer.Jar)
+		wserver, rsp, err = dialer.Dial(targurl, headers)
+	}
 	if err != nil {
 		fmt.Println(err)
 		fmt.Println(rsp)

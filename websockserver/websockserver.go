@@ -61,8 +61,6 @@ func (wss *WebSockServer) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 }
 // vconn := vc.GetWebsockConnection(conn, sessionid, subprots[0]}
 
-
-
 func CreateWebSockServer(approver string, authtoken string) WebSockServer {
 	wss := WebSockServer{approver, authtoken}
 	return wss
