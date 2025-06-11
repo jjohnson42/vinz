@@ -53,10 +53,6 @@ func (wss *WebSockServer) ServeHTTP(wr http.ResponseWriter, r *http.Request) {
 		fmt.Println(err)
 		return
 	}
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
 	vconn.WebSockConnect((conn))
 }
 // vconn := vc.GetWebsockConnection(conn, sessionid, subprots[0]}
