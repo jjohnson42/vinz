@@ -151,11 +151,9 @@ func (vconn *VncConnection) relayToClient(toclient chan []byte, wserver *websock
 				}
 			} else if pktnum == 1 {
 				if (msg[0] == 1 && msg[1] == 2) {
-					fmt.Println("Got auth request, intercepting")
 					serverinitpkt = 4
 					cryptpkt = 2
 					msg = []byte("\x01\x01")
-					fmt.Println(msg)
 					vconn.swallowauth = true
 				} else if !bytes.Equal(msg, securitymsg) {
 					customnamesupport = false
@@ -172,12 +170,8 @@ func (vconn *VncConnection) relayToClient(toclient chan []byte, wserver *websock
 					fmt.Println(err)
 					return
 				}
-				fmt.Println(vconn.passwd)
-				fmt.Println(key)
-				fmt.Println(msg)
 				nc.Encrypt(rsp[:8], msg[:8])
 				nc.Encrypt(rsp[8:], msg[8:])
-				fmt.Println(rsp)
 				wserver.WriteMessage(websocket.BinaryMessage, rsp)
 				pktnum += 1
 				continue
@@ -495,11 +489,8 @@ func (vconn *VncConnection) connectToIkvm() (*websocket.Conn, error) {
 	headers := http.Header{}
 	headers.Add("Host", hostname)
 	targurl := fmt.Sprintf("wss://%s:%d%s", urlhost, vconn.portnum, vconn.targurl)
-	fmt.Println(targurl)
 	SetCookies(targurl, vconn.cookies, dialer.Jar)
 	wserver, rsp, err := dialer.Dial(targurl, headers)
-	fmt.Println(err)
-	fmt.Println(rsp.StatusCode)
 	if (rsp.StatusCode == 404) {
 		targurl := fmt.Sprintf("wss://%s%s/multi", urlhost, vconn.targurl)
 		SetCookies(targurl, vconn.cookies, dialer.Jar)
