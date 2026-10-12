@@ -417,6 +417,8 @@ func (vconn *VncConnection) Connect(vncclient net.Conn, wsclient *websocket.Conn
 		// Notify controller of disconnect, allowing it to logout or
 		// whatever is appropriate
 		binary.Write(conn, binary.BigEndian, byte(2)) // disconnect notification
+		binary.Write(conn, binary.BigEndian, uint32(len(vconn.vinztoken)))
+		conn.Write([]byte(vconn.vinztoken))
 		binary.Write(conn, binary.BigEndian, uint32(len(sessionid)))
 		conn.Write([]byte(sessionid))
 		binary.Write(conn, binary.BigEndian, byte(255)) // disconnect notification
