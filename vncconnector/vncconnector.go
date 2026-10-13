@@ -410,6 +410,7 @@ func (vconn *VncConnection) Connect(vncclient net.Conn, wsclient *websocket.Conn
 	}
 	defer func() {
 		wserver.Close()
+		vncclient.Close()
 		conn, err := net.Dial("unix", vconn.sessionpath)
 		if err != nil {
 			return
