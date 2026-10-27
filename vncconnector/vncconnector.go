@@ -422,11 +422,17 @@ func (vconn *VncConnection) Connect(vncclient net.Conn, wsclient *websocket.Conn
 	}
 	defer func() {
 		wserver.Close()
-		vncclient.Close()
+		if vncclient != nil {
+			vncclient.Close()
+		}
+		if wsclient != nil {
+			wsclient.Close()
+		}
 		conn, err := net.Dial("unix", vconn.sessionpath)
 		if err != nil {
 			return
 		}
+		defer conn.Close()
 		// Notify controller of disconnect, allowing it to logout or
 		// whatever is appropriate
 		binary.Write(conn, binary.BigEndian, byte(2)) // disconnect notification
